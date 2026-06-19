@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tennis Calculator</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Tennis Calculator</p>
+          <h1>テニス勝率・軌道計算</h1>
+        </div>
+        <nav class="tabs" aria-label="計算モード">
+          <button class="tab-button active" type="button" data-panel="probability">勝率</button>
+          <button class="tab-button" type="button" data-panel="trajectory">軌道</button>
+        </nav>
+      </header>
+
+      <section class="panel active" id="probability" aria-labelledby="probability-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Probability</p>
+            <h2 id="probability-title">ポイントからセット勝率を読む</h2>
+          </div>
+        </div>
+
+        <div class="workspace probability-grid">
+          <form class="control-panel" id="probabilityForm">
+            <div class="input-group">
+              <div class="input-group-title">
+                <span>自分側</span>
+              </div>
+              <label class="control">
+                <span>1stサーブ確率</span>
+                <input id="firstServeIn" type="range" min="0" max="100" step="1" value="62" />
+                <output id="firstServeInOut">62%</output>
+              </label>
+              <label class="control">
+                <span>1stサーブ得点率</span>
+                <input id="firstServeWon" type="range" min="0" max="100" step="1" value="71" />
+                <output id="firstServeWonOut">71%</output>
+              </label>
+              <label class="control">
+                <span>2ndサーブ得点率</span>
+                <input id="secondServeWon" type="range" min="0" max="100" step="1" value="52" />
+                <output id="secondServeWonOut">52%</output>
+              </label>
+              <div class="input-summary">
+                <div>
+                  <span>サーブ時ポイント獲得率</span>
+                  <strong id="ownServePointValue">63.8%</strong>
+                </div>
+                <div class="bar"><span id="ownServePointBar"></span></div>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <div class="input-group-title">
+                <span>相手側</span>
+              </div>
+              <label class="control">
+                <span>1stサーブ確率</span>
+                <input id="opponentFirstServeIn" type="range" min="0" max="100" step="1" value="60" />
+                <output id="opponentFirstServeInOut">60%</output>
+              </label>
+              <label class="control">
+                <span>1stサーブ得点率</span>
+                <input id="opponentFirstServeWon" type="range" min="0" max="100" step="1" value="68" />
+                <output id="opponentFirstServeWonOut">68%</output>
+              </label>
+              <label class="control">
+                <span>2ndサーブ得点率</span>
+                <input id="opponentSecondServeWon" type="range" min="0" max="100" step="1" value="48" />
+                <output id="opponentSecondServeWonOut">48%</output>
+              </label>
+              <div class="input-summary">
+                <div>
+                  <span>サーブ時ポイント獲得率</span>
+                  <strong id="opponentServePointValue">60.0%</strong>
+                </div>
+                <div class="bar"><span id="opponentServePointBar"></span></div>
+              </div>
+            </div>
+          </form>
+
+          <div class="set-score-board">
+            <div class="board-title">
+              <div>
+                <span class="card-label">1セットの最終ゲームカウント</span>
+                <small>サーブ開始2パターン平均</small>
+              </div>
+            </div>
+            <div class="score-distribution" id="setScoreDistribution"></div>
+          </div>
+
+          <div class="results-board">
+            <div class="score-card">
+              <span class="card-label">セット勝率</span>
+              <strong id="setWinValue">61.7%</strong>
+              <div class="bar"><span id="setWinBar"></span></div>
+            </div>
+            <div class="score-card">
+              <span class="card-label">ポイント獲得率</span>
+              <strong id="pointWinValue">52.0%</strong>
+              <div class="bar"><span id="pointWinBar"></span></div>
+              <small>サーブ/リターン平均</small>
+            </div>
+            <div class="score-card">
+              <span class="card-label">ゲーム勝率</span>
+              <strong id="gameWinValue">59.9%</strong>
+              <div class="bar"><span id="gameWinBar"></span></div>
+              <small>1ゲームを取る確率</small>
+            </div>
+            <div class="score-card">
+              <span class="card-label">キープ率</span>
+              <strong id="holdValue">78.0%</strong>
+              <div class="bar"><span id="holdBar"></span></div>
+              <small id="servePointValue">サーブ時得点率 63.8%</small>
+            </div>
+            <div class="score-card">
+              <span class="card-label">ブレーク率</span>
+              <strong id="breakValue">23.7%</strong>
+              <div class="bar"><span id="breakBar"></span></div>
+              <small id="returnPointValue">リターン時得点率 40.0%</small>
+            </div>
+            <div class="score-card">
+              <span class="card-label">タイブレーク勝率</span>
+              <strong id="tiebreakValue">57.8%</strong>
+              <div class="bar"><span id="tiebreakBar"></span></div>
+              <small>タイブレーク時</small>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="trajectory" aria-labelledby="trajectory-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Trajectory</p>
+            <h2 id="trajectory-title">ショットの軌道と着地点を計算</h2>
+          </div>
+          <div class="metric-strip">
+            <div>
+              <span id="landingLabel">18.7 m</span>
+              <small>着地点</small>
+            </div>
+            <div>
+              <span id="clearanceLabel">+0.42 m</span>
+              <small>ネット余裕</small>
+            </div>
+          </div>
+        </div>
+
+        <div class="workspace trajectory-grid">
+          <form class="control-panel" id="trajectoryForm">
+            <div class="segmented" role="radiogroup" aria-label="打点プリセット">
+              <label>
+                <input type="radio" name="contactPreset" value="groundstroke" checked />
+                <span>平均ストローク</span>
+              </label>
+              <label>
+                <input type="radio" name="contactPreset" value="serve" />
+                <span>平均サーブ</span>
+              </label>
+              <label>
+                <input type="radio" name="contactPreset" value="custom" />
+                <span>カスタム</span>
+              </label>
+            </div>
+            <label class="control">
+              <span>初速</span>
+              <input id="ballSpeed" type="range" min="50" max="210" step="1" value="118" />
+              <output id="ballSpeedOut">118 km/h</output>
+            </label>
+            <label class="control">
+              <span>打ち出し角度</span>
+              <input id="launchAngle" type="range" min="-8" max="18" step="0.1" value="6.5" />
+              <output id="launchAngleOut">6.5°</output>
+            </label>
+            <label class="control">
+              <span>打点の高さ</span>
+              <input id="contactHeight" type="range" min="0.2" max="3.0" step="0.05" value="1.15" />
+              <output id="contactHeightOut">1.15 m</output>
+            </label>
+            <label class="control">
+              <span>打点の前後位置</span>
+              <input id="contactDepth" type="range" min="-3" max="4" step="0.1" value="0" />
+              <output id="contactDepthOut">0.0 m</output>
+            </label>
+            <label class="control">
+              <span>トップスピン</span>
+              <input id="topspin" type="range" min="0" max="4200" step="50" value="1900" />
+              <output id="topspinOut">1900 rpm</output>
+            </label>
+          </form>
+
+          <div class="court-wrap">
+            <canvas id="trajectoryCanvas" width="1100" height="520" aria-label="ボール軌道グラフ"></canvas>
+            <div class="trajectory-status" id="trajectoryStatus">ベースライン内に着地します</div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
