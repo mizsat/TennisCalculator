@@ -1,6 +1,18 @@
 const pct = (value, digits = 1) => `${(value * 100).toFixed(digits)}%`;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const TENNIS_BALL_DRAG = 0.009;
+const SINGLES_HALF_WIDTH = 8.23 / 2;
+const DOUBLES_HALF_WIDTH = 10.97 / 2;
+const NET_X = 11.885;
+const NET_POST_OFFSET = DOUBLES_HALF_WIDTH + 0.914;
+const NET_CENTER_HEIGHT = 0.914;
+const NET_POST_HEIGHT = 1.07;
+
+function netHeightAt(lateralPosition) {
+  if (Math.abs(lateralPosition) > NET_POST_OFFSET) return null;
+  const fraction = Math.abs(lateralPosition) / NET_POST_OFFSET;
+  return NET_CENTER_HEIGHT + (NET_POST_HEIGHT - NET_CENTER_HEIGHT) * fraction;
+}
 const CONTACT_PRESETS = {
   groundstroke: { height: 1.1, depth: -0.7 },
   serve: { height: 2.65, depth: 0.4 },
@@ -250,6 +262,7 @@ function updateProbability() {
 function simulateTrajectory() {
   const speed = readNumber("ballSpeed") / 3.6;
   const angle = (readNumber("launchAngle") * Math.PI) / 180;
+  const lateralAngle = (readNumber("lateralAngle") * Math.PI) / 180;
   const startHeight = readNumber("contactHeight");
   const contactDepth = readNumber("contactDepth");
   const topspin = readNumber("topspin");
@@ -259,33 +272,45 @@ function simulateTrajectory() {
 
   let x = contactDepth;
   let y = startHeight;
-  let vx = speed * Math.cos(angle);
+  let z = 0;
+  let vx = speed * Math.cos(angle) * Math.cos(lateralAngle);
   let vy = speed * Math.sin(angle);
+  let vz = speed * Math.cos(angle) * Math.sin(lateralAngle);
   const dt = 0.01;
-  const points = [{ x, y }];
-  let netHeightAtCrossing = null;
+  const points = [{ x, y, z }];
+  let netCrossing = null;
   let landingX = null;
+  let landingZ = null;
 
   for (let step = 0; step < 900; step += 1) {
-    const velocity = Math.hypot(vx, vy);
+    const velocity = Math.hypot(vx, vy, vz);
     const ax = -drag * velocity * vx;
     const ay = -gravity - drag * velocity * vy;
+    const az = -drag * velocity * vz;
 
     vx += ax * dt;
     vy += ay * dt;
+    vz += az * dt;
     x += vx * dt;
     y += vy * dt;
+    z += vz * dt;
 
-    points.push({ x, y: Math.max(y, 0) });
+    points.push({ x, y: Math.max(y, 0), z });
 
-    if (netHeightAtCrossing === null && x >= 11.885) {
+    if (netCrossing === null && x >= NET_X) {
       const prev = points[points.length - 2];
-      const ratio = (11.885 - prev.x) / (x - prev.x);
-      netHeightAtCrossing = prev.y + (y - prev.y) * ratio;
+      const ratio = (NET_X - prev.x) / (x - prev.x);
+      const ballHeight = prev.y + (y - prev.y) * ratio;
+      if (ballHeight > 0) {
+        const lateralPosition = prev.z + (z - prev.z) * ratio;
+        const netHeight = netHeightAt(lateralPosition);
+        netCrossing = { netHeight, clearance: netHeight === null ? null : ballHeight - netHeight };
+      }
     }
 
     if (y <= 0) {
       landingX = x;
+      landingZ = z;
       break;
     }
   }
@@ -293,8 +318,99 @@ function simulateTrajectory() {
   return {
     points,
     landingX: landingX ?? x,
-    netClearance: (netHeightAtCrossing ?? 0) - 0.914,
+    landingZ: landingZ ?? z,
+    netCrossing,
   };
+}
+
+function drawLateralTrajectory(result) {
+  const canvas = document.getElementById("lateralCanvas");
+  const context = canvas.getContext("2d");
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.round(rect.width * dpr);
+  canvas.height = Math.round(rect.height * dpr);
+  context.scale(dpr, dpr);
+
+  const width = rect.width;
+  const height = rect.height;
+  if (!width || !height) return;
+
+  const courtLength = 23.77;
+  const halfWidth = DOUBLES_HALF_WIDTH;
+  const minX = Math.min(-1.5, result.points[0].x - 1);
+  const maxX = Math.max(courtLength + 1.5, result.landingX + 1);
+  const maxZ = Math.max(halfWidth + 1, Math.abs(result.landingZ) + 1);
+  const scale = Math.min((width - 24) / (maxX - minX), (height - 40) / (2 * maxZ));
+  const toCanvasX = (x) => width / 2 + (x - (minX + maxX) / 2) * scale;
+  const toCanvasY = (z) => height / 2 + z * scale;
+  const courtLeft = toCanvasX(0);
+  const courtRight = toCanvasX(courtLength);
+  const courtTop = toCanvasY(-halfWidth);
+  const courtBottom = toCanvasY(halfWidth);
+  const courtWidth = courtRight - courtLeft;
+  const courtHeight = courtBottom - courtTop;
+
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = "#f8faf6";
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = "#256c52";
+  context.fillRect(courtLeft, courtTop, courtWidth, courtHeight);
+  context.strokeStyle = "rgba(255, 255, 255, 0.86)";
+  context.lineWidth = 1.5;
+  context.strokeRect(courtLeft, courtTop, courtWidth, courtHeight);
+  for (const sideline of [-SINGLES_HALF_WIDTH, SINGLES_HALF_WIDTH]) {
+    context.beginPath();
+    context.moveTo(courtLeft, toCanvasY(sideline));
+    context.lineTo(courtRight, toCanvasY(sideline));
+    context.stroke();
+  }
+  const netX = NET_X;
+  const serviceLines = [netX - 6.4, netX + 6.4];
+  serviceLines.forEach((mark) => {
+    context.beginPath();
+    context.moveTo(toCanvasX(mark), toCanvasY(-SINGLES_HALF_WIDTH));
+    context.lineTo(toCanvasX(mark), toCanvasY(SINGLES_HALF_WIDTH));
+    context.stroke();
+  });
+  context.beginPath();
+  context.moveTo(toCanvasX(serviceLines[0]), toCanvasY(0));
+  context.lineTo(toCanvasX(serviceLines[1]), toCanvasY(0));
+  context.moveTo(courtLeft, toCanvasY(0));
+  context.lineTo(toCanvasX(0.15), toCanvasY(0));
+  context.moveTo(courtRight, toCanvasY(0));
+  context.lineTo(toCanvasX(courtLength - 0.15), toCanvasY(0));
+  context.stroke();
+
+  context.strokeStyle = "#14201b";
+  context.lineWidth = 2;
+  context.beginPath();
+  context.moveTo(toCanvasX(netX), toCanvasY(-NET_POST_OFFSET));
+  context.lineTo(toCanvasX(netX), toCanvasY(NET_POST_OFFSET));
+  context.stroke();
+
+  context.strokeStyle = "#d8ad38";
+  context.lineWidth = 4;
+  context.lineJoin = "round";
+  context.lineCap = "round";
+  context.beginPath();
+  result.points.forEach((point, index) => {
+    const px = toCanvasX(point.x);
+    const py = toCanvasY(point.z);
+    if (index === 0) context.moveTo(px, py);
+    else context.lineTo(px, py);
+  });
+  context.stroke();
+  context.fillStyle = "#c25e3b";
+  context.beginPath();
+  context.arc(toCanvasX(result.landingX), toCanvasY(result.landingZ), 6, 0, Math.PI * 2);
+  context.fill();
+
+  context.fillStyle = "#14201b";
+  context.font = "700 12px system-ui";
+  context.textAlign = "center";
+  context.fillText("左", width / 2, courtTop - 4);
+  context.fillText("右", width / 2, courtBottom + 16);
 }
 
 function drawTrajectory() {
@@ -318,6 +434,9 @@ function drawTrajectory() {
   const scaleY = (y) => pad.top + chartH - (y / maxY) * chartH;
 
   const result = simulateTrajectory();
+  const netHeight = result.netCrossing ? result.netCrossing.netHeight : NET_CENTER_HEIGHT;
+  const netClearance = result.netCrossing?.clearance ?? null;
+  drawLateralTrajectory(result);
   context.clearRect(0, 0, width, height);
 
   context.fillStyle = "#f8faf6";
@@ -340,14 +459,16 @@ function drawTrajectory() {
   context.strokeStyle = "#14201b";
   context.lineWidth = 3;
   context.beginPath();
-  context.moveTo(scaleX(11.885), scaleY(0));
-  context.lineTo(scaleX(11.885), scaleY(0.914));
-  context.stroke();
+  if (netHeight !== null) {
+    context.moveTo(scaleX(NET_X), scaleY(0));
+    context.lineTo(scaleX(NET_X), scaleY(netHeight));
+    context.stroke();
+  }
 
   context.fillStyle = "#14201b";
   context.font = "700 12px system-ui";
   context.textAlign = "center";
-  context.fillText("ネット", scaleX(11.885), scaleY(0.914) - 8);
+  if (netHeight !== null) context.fillText("ネット", scaleX(NET_X), scaleY(netHeight) - 8);
   context.fillText("打点側ベースライン", scaleX(0), scaleY(0) + 44);
   context.fillText("相手ベースライン", scaleX(23.77), scaleY(0) + 44);
 
@@ -370,20 +491,35 @@ function drawTrajectory() {
   context.arc(scaleX(last.x), scaleY(last.y), 6, 0, Math.PI * 2);
   context.fill();
 
-  const inCourt = result.landingX <= 23.77 && result.netClearance > 0;
+  const clearsNet = result.netCrossing !== null && (netClearance === null || netClearance > 0);
+  const inCourt = result.landingX <= 23.77 && Math.abs(result.landingZ) <= DOUBLES_HALF_WIDTH && clearsNet;
   const status = document.getElementById("trajectoryStatus");
   status.classList.toggle("out", !inCourt);
   status.textContent = inCourt
-    ? "ベースライン内に着地します"
-    : result.netClearance <= 0
+    ? "ダブルスコート内に着地します"
+    : result.netCrossing === null
+      ? "ネットの手前に着地します"
+      : !clearsNet
       ? "ネットにかかる軌道です"
-      : "ベースラインを越える軌道です";
+      : result.landingX > 23.77
+        ? "ベースラインを越える軌道です"
+        : "ダブルスのサイドラインを越える軌道です";
 
-  setText("landingLabel", `${result.landingX.toFixed(1)} m`);
-  setText("clearanceLabel", `${result.netClearance >= 0 ? "+" : ""}${result.netClearance.toFixed(2)} m`);
+  const lateralLanding = Math.abs(result.landingZ) < 0.05
+    ? "中央"
+    : `${result.landingZ < 0 ? "左" : "右"} ${Math.abs(result.landingZ).toFixed(1)} m`;
+  setText("landingLabel", `${result.landingX.toFixed(1)} m / ${lateralLanding}`);
+  setText("clearanceLabel", netClearance === null
+    ? (result.netCrossing ? "ポストの外側" : "ネット未到達")
+    : `${netClearance >= 0 ? "+" : ""}${netClearance.toFixed(2)} m`);
+  const crossingNetHeight = result.netCrossing?.netHeight;
+  setText("crossingNetHeight", crossingNetHeight == null
+    ? "通過位置のネット高 —"
+    : `通過位置のネット高 ${crossingNetHeight.toFixed(3)} m`);
 
   setText("ballSpeedOut", `${readNumber("ballSpeed")} km/h`);
   setText("launchAngleOut", `${readNumber("launchAngle").toFixed(1)}°`);
+  setText("lateralAngleOut", `${readNumber("lateralAngle").toFixed(1)}°`);
   setText("contactHeightOut", `${readNumber("contactHeight").toFixed(2)} m`);
   setText("contactDepthOut", formatCourtDepth(readNumber("contactDepth")));
   setText("topspinOut", `${readNumber("topspin")} rpm`);

@@ -150,6 +150,7 @@
             <div>
               <span id="clearanceLabel">+0.42 m</span>
               <small>ネット余裕</small>
+              <small id="crossingNetHeight">通過位置のネット高 —</small>
             </div>
           </div>
         </div>
@@ -181,6 +182,11 @@
               <output id="launchAngleOut">6.5°</output>
             </label>
             <label class="control">
+              <span>左右の打ち出し角度</span>
+              <input id="lateralAngle" type="range" min="-25" max="25" step="0.5" value="0" />
+              <output id="lateralAngleOut">0.0°</output>
+            </label>
+            <label class="control">
               <span>打点の高さ</span>
               <input id="contactHeight" type="range" min="0.2" max="3.0" step="0.05" value="1.15" />
               <output id="contactHeightOut">1.15 m</output>
@@ -199,6 +205,7 @@
 
           <div class="court-wrap">
             <canvas id="trajectoryCanvas" width="1100" height="520" aria-label="ボール軌道グラフ"></canvas>
+            <canvas id="lateralCanvas" class="lateral-canvas" width="1100" height="240" aria-label="ダブルスコートを上から見た軌道"></canvas>
             <div class="trajectory-status" id="trajectoryStatus">ベースライン内に着地します</div>
           </div>
         </div>
