@@ -90,6 +90,16 @@ h2 {
   box-shadow: 0 8px 22px rgba(20, 32, 27, 0.07);
 }
 
+.reset-settings {
+  min-height: 40px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+}
+
 .tab-button {
   min-height: 40px;
   border: 0;
@@ -436,9 +446,35 @@ input[type="range"] {
 
 .court-wrap {
   min-height: 450px;
-  display: grid;
-  grid-template-rows: auto auto 1fr;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+}
+
+.court-wrap [hidden] {
+  display: none;
+}
+
+.view-controls {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.view-controls button {
+  min-height: 36px;
+  padding: 4px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f8faf6;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.view-controls button[aria-pressed="true"] {
+  background: var(--court);
+  color: white;
 }
 
 canvas {
@@ -455,7 +491,17 @@ canvas.lateral-canvas {
   border-top: 1px solid var(--line);
 }
 
+.court-wrap canvas {
+  touch-action: none;
+}
+
+.landing-hint {
+  padding: 8px 18px;
+  color: var(--muted);
+}
+
 .trajectory-status {
+  margin-top: auto;
   min-height: 52px;
   display: flex;
   align-items: center;

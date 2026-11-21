@@ -17,6 +17,7 @@
           <button class="tab-button active" type="button" data-panel="probability">勝率</button>
           <button class="tab-button" type="button" data-panel="trajectory">軌道</button>
         </nav>
+        <button class="reset-settings" id="resetSettings" type="button">初期設定に戻す</button>
       </header>
 
       <section class="panel active" id="probability" aria-labelledby="probability-title">
@@ -193,8 +194,13 @@
             </label>
             <label class="control">
               <span>打点の前後位置</span>
-              <input id="contactDepth" type="range" min="-3" max="4" step="0.1" value="0" />
+              <input id="contactDepth" type="range" min="-3" max="11.5" step="0.1" value="0" />
               <output id="contactDepthOut">0.0 m</output>
+            </label>
+            <label class="control">
+              <span>打点の左右位置</span>
+              <input id="contactLateral" type="range" min="-7" max="7" step="0.1" value="0" />
+              <output id="contactLateralOut">中央</output>
             </label>
             <label class="control">
               <span>トップスピン</span>
@@ -204,8 +210,15 @@
           </form>
 
           <div class="court-wrap">
-            <canvas id="trajectoryCanvas" width="1100" height="520" aria-label="ボール軌道グラフ"></canvas>
-            <canvas id="lateralCanvas" class="lateral-canvas" width="1100" height="240" aria-label="ダブルスコートを上から見た軌道"></canvas>
+            <div class="view-controls" role="group" aria-label="軌道図の視点">
+              <button type="button" data-view="spatial" aria-pressed="true">3D</button>
+              <button type="button" data-view="top" aria-pressed="false">上面</button>
+              <button type="button" data-view="side" aria-pressed="false">側面</button>
+            </div>
+            <canvas id="spatialCanvas" aria-label="斜め上から見た立体軌道"></canvas>
+            <canvas id="lateralCanvas" class="lateral-canvas" width="1100" height="240" aria-label="ダブルスコートを上から見た軌道" hidden></canvas>
+            <canvas id="trajectoryCanvas" width="1100" height="520" aria-label="横から見たボール軌道" hidden></canvas>
+            <small class="landing-hint">青い点をドラッグして打点を移動。赤い点をドラッグして着地点を調整。</small>
             <div class="trajectory-status" id="trajectoryStatus">ベースライン内に着地します</div>
           </div>
         </div>

@@ -208,6 +208,7 @@ function applyContactPreset(value) {
 
   setInputValue("contactHeight", preset.height);
   setInputValue("contactDepth", preset.depth);
+  setInputValue("contactLateral", 0);
   drawTrajectory();
 }
 
@@ -259,10 +260,10 @@ function updateProbability() {
   renderSetScoreDistribution(neutralSetScoreDistribution(hold, breakRate, tiebreak));
 }
 
-function simulateTrajectory() {
+function simulateTrajectory(launchDegrees = readNumber("launchAngle"), lateralDegrees = readNumber("lateralAngle")) {
   const speed = readNumber("ballSpeed") / 3.6;
-  const angle = (readNumber("launchAngle") * Math.PI) / 180;
-  const lateralAngle = (readNumber("lateralAngle") * Math.PI) / 180;
+  const angle = (launchDegrees * Math.PI) / 180;
+  const lateralAngle = (lateralDegrees * Math.PI) / 180;
   const startHeight = readNumber("contactHeight");
   const contactDepth = readNumber("contactDepth");
   const topspin = readNumber("topspin");
@@ -272,7 +273,7 @@ function simulateTrajectory() {
 
   let x = contactDepth;
   let y = startHeight;
-  let z = 0;
+  let z = readNumber("contactLateral");
   let vx = speed * Math.cos(angle) * Math.cos(lateralAngle);
   let vy = speed * Math.sin(angle);
   let vz = speed * Math.cos(angle) * Math.sin(lateralAngle);
@@ -323,26 +324,149 @@ function simulateTrajectory() {
   };
 }
 
+const landingViews = new WeakMap();
+let landingDrag;
+
+function drawContactMarker(context, x, y, moveTo) {
+  context.beginPath();
+  context.arc(x, y, 6, 0, Math.PI * 2);
+  context.fillStyle = "#2d6f9f";
+  context.fill();
+  context.strokeStyle = "#fff";
+  context.lineWidth = 1.5;
+  context.stroke();
+  return { markerX: x, markerY: y, moveTo };
+}
+
+function moveContact(x, z, height) {
+  setInputValue("contactDepth", x);
+  setInputValue("contactLateral", z);
+  setInputValue("contactHeight", height);
+  setContactPresetValue("custom");
+  drawTrajectory();
+}
+
+function drawSpatialTrajectory(result) {
+  const canvas = document.getElementById("spatialCanvas");
+  const { width, height } = canvas.getBoundingClientRect();
+  if (!width || !height) return;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  const context = canvas.getContext("2d");
+  context.scale(dpr, dpr);
+
+  // Orthographic view from behind and to the side of the hitter.
+  const project = ({ x, y, z }) => ({
+    u: 0.6 * x + 0.8 * z,
+    v: -0.44 * x + 0.33 * z - 0.835 * y,
+  });
+  const half = DOUBLES_HALF_WIDTH;
+  const nearLeft = { x: 0, y: 0, z: -half };
+  const nearRight = { x: 0, y: 0, z: half };
+  const farLeft = { x: 23.77, y: 0, z: -half };
+  const farRight = { x: 23.77, y: 0, z: half };
+  const court = [nearLeft, farLeft, farRight, nearRight];
+  const net = [-NET_POST_OFFSET, 0, NET_POST_OFFSET].map((z) => ({
+    x: NET_X, y: netHeightAt(z), z,
+  }));
+  const ground = result.points.map(({ x, z }) => ({ x, y: 0, z }));
+  const bounds = [...court, ...net, ...ground, ...result.points].map(project);
+  const minU = Math.min(...bounds.map(({ u }) => u));
+  const maxU = Math.max(...bounds.map(({ u }) => u));
+  const minV = Math.min(...bounds.map(({ v }) => v));
+  const maxV = Math.max(...bounds.map(({ v }) => v));
+  const frozen = landingDrag?.canvas === canvas ? landingDrag.view : null;
+  const scale = frozen?.scale ?? Math.max(1, Math.min((width - 40) / (maxU - minU), (height - 40) / (maxV - minV)));
+  const screen = frozen?.screen ?? ((point) => {
+    const { u, v } = project(point);
+    return [width / 2 + (u - (minU + maxU) / 2) * scale, height / 2 + (v - (minV + maxV) / 2) * scale];
+  });
+  const path = (points, closed = false) => {
+    context.beginPath();
+    context.moveTo(...screen(points[0]));
+    for (const point of points.slice(1)) context.lineTo(...screen(point));
+    if (closed) context.closePath();
+  };
+  const line = (x1, z1, x2, z2) => {
+    path([{ x: x1, y: 0, z: z1 }, { x: x2, y: 0, z: z2 }]);
+    context.stroke();
+  };
+
+  context.fillStyle = "#f8faf6";
+  context.fillRect(0, 0, width, height);
+  path(court, true);
+  context.fillStyle = "#256c52";
+  context.fill();
+  context.strokeStyle = "#fff";
+  context.lineWidth = 1.5;
+  context.stroke();
+  const singles = SINGLES_HALF_WIDTH;
+  for (const z of [-singles, singles]) line(0, z, 23.77, z);
+  for (const x of [NET_X - 6.4, NET_X + 6.4]) line(x, -singles, x, singles);
+  line(NET_X - 6.4, 0, NET_X + 6.4, 0);
+
+  const netBase = [net[2], net[0]].map((point) => ({ ...point, y: 0 }));
+  path([...net, ...netBase], true);
+  context.fillStyle = "rgba(20, 32, 27, 0.45)";
+  context.fill();
+  context.strokeStyle = "#14201b";
+  context.stroke();
+
+  context.setLineDash([4, 4]);
+  path(ground);
+  context.strokeStyle = "#64706a";
+  context.stroke();
+  context.setLineDash([]);
+  path(result.points);
+  context.strokeStyle = "#d8ad38";
+  context.lineWidth = 3;
+  context.lineJoin = "round";
+  context.stroke();
+  context.beginPath();
+  const [markerX, markerY] = screen({ x: result.landingX, y: 0, z: result.landingZ });
+  context.arc(markerX, markerY, 5, 0, Math.PI * 2);
+  context.fillStyle = "#c25e3b";
+  context.fill();
+  const [originX, originY] = screen({ x: 0, y: 0, z: 0 });
+  const start = result.points[0];
+  const groundTarget = (x, y) => {
+    const u = (x - originX) / scale;
+    const v = (y - originY) / scale;
+    return [(0.33 * u - 0.8 * v) / 0.55, (0.44 * u + 0.6 * v) / 0.55];
+  };
+  const contact = drawContactMarker(context, ...screen(start), (x, y) => {
+    moveContact(...groundTarget(x, y + 0.835 * start.y * scale), start.y);
+  });
+  landingViews.set(canvas, {
+    markerX, markerY, screen, scale, contact,
+    targetAt: groundTarget,
+  });
+}
+
 function drawLateralTrajectory(result) {
   const canvas = document.getElementById("lateralCanvas");
   const context = canvas.getContext("2d");
   const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  canvas.width = Math.round(rect.width * dpr);
-  canvas.height = Math.round(rect.height * dpr);
-  context.scale(dpr, dpr);
-
-  const width = rect.width;
-  const height = rect.height;
-  if (!width || !height) return;
+  const width = canvas.parentElement.clientWidth;
+  if (!width) return;
 
   const courtLength = 23.77;
   const halfWidth = DOUBLES_HALF_WIDTH;
   const minX = Math.min(-1.5, result.points[0].x - 1);
   const maxX = Math.max(courtLength + 1.5, result.landingX + 1);
-  const maxZ = Math.max(halfWidth + 1, Math.abs(result.landingZ) + 1);
-  const scale = Math.min((width - 24) / (maxX - minX), (height - 40) / (2 * maxZ));
-  const toCanvasX = (x) => width / 2 + (x - (minX + maxX) / 2) * scale;
+  const start = result.points[0];
+  const maxZ = Math.max(halfWidth, Math.abs(start.z), Math.abs(result.landingZ)) + 1;
+  const layout = landingDrag?.view.layout;
+  const scale = layout?.scale ?? Math.max(1, width - 48) / (maxX - minX);
+  const centerX = layout?.centerX ?? (minX + maxX) / 2;
+  const drawingHeight = layout?.height ?? Math.max(240, Math.ceil(2 * maxZ * scale + 40));
+  canvas.style.height = `${drawingHeight + 1}px`;
+  const height = drawingHeight;
+  canvas.width = Math.round(width * dpr);
+  canvas.height = Math.round(height * dpr);
+  context.scale(dpr, dpr);
+  const toCanvasX = (x) => width / 2 + (x - centerX) * scale;
   const toCanvasY = (z) => height / 2 + z * scale;
   const courtLeft = toCanvasX(0);
   const courtRight = toCanvasX(courtLength);
@@ -411,6 +535,97 @@ function drawLateralTrajectory(result) {
   context.textAlign = "center";
   context.fillText("左", width / 2, courtTop - 4);
   context.fillText("右", width / 2, courtBottom + 16);
+  const topLayout = { height, scale, centerX };
+  const targetAt = (x, y) => [centerX + (x - width / 2) / scale, (y - height / 2) / scale];
+  const contact = drawContactMarker(context, toCanvasX(start.x), toCanvasY(start.z), (x, y) => {
+    moveContact(...targetAt(x, y), start.y);
+  });
+  landingViews.set(canvas, {
+    layout: topLayout,
+    contact,
+    markerX: toCanvasX(result.landingX),
+    markerY: toCanvasY(result.landingZ),
+    targetAt,
+  });
+  return { scaleX: toCanvasX, layout: topLayout };
+}
+
+function aimAtLanding(targetX, targetZ) {
+  const contactDepth = readNumber("contactDepth");
+  const contactLateral = readNumber("contactLateral");
+  const forward = targetX - contactDepth;
+  const sideways = targetZ - contactLateral;
+  const lateral = document.getElementById("lateralAngle");
+  lateral.value = String(clamp(Math.atan2(sideways, forward) * 180 / Math.PI, Number(lateral.min), Number(lateral.max)));
+  const lateralDegrees = Number(lateral.value);
+  const radians = lateralDegrees * Math.PI / 180;
+  const targetRange = forward * Math.cos(radians) + sideways * Math.sin(radians);
+  const launch = document.getElementById("launchAngle");
+  const min = Number(launch.min);
+  const step = Number(launch.step);
+  const rangeAt = (index) => {
+    const result = simulateTrajectory(min + index * step, lateralDegrees);
+    return Math.hypot(result.landingX - contactDepth, result.landingZ - contactLateral);
+  };
+  let low = 0;
+  let high = Math.round((Number(launch.max) - min) / step);
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (rangeAt(mid) < targetRange) low = mid + 1;
+    else high = mid;
+  }
+  if (low > 0 && Math.abs(rangeAt(low - 1) - targetRange) < Math.abs(rangeAt(low) - targetRange)) low -= 1;
+  launch.value = String(min + low * step);
+  drawTrajectory();
+}
+
+const landingCanvas = document.getElementById("lateralCanvas");
+function landingPointer(event, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top - canvas.clientTop };
+}
+
+function draggableMarker(view, x, y) {
+  if (!view) return null;
+  const distance = (marker) => Math.hypot(x - marker.markerX, y - marker.markerY);
+  const marker = distance(view.contact) <= distance(view) ? view.contact : view;
+  return distance(marker) <= 18 ? marker : null;
+}
+
+function bindLandingDrag(canvas) {
+  canvas.addEventListener("pointerdown", (event) => {
+    const landingView = landingViews.get(canvas);
+    if (!landingView || landingDrag || event.button !== 0) return;
+    const { x, y } = landingPointer(event, canvas);
+    const marker = draggableMarker(landingView, x, y);
+    if (!marker) return;
+    const offsetX = x - marker.markerX;
+    const offsetY = y - marker.markerY;
+    const moveTo = marker.moveTo ?? ((px, py) => aimAtLanding(...landingView.targetAt(px, py)));
+    landingDrag = { canvas, pointerId: event.pointerId, view: landingView, offsetX, offsetY, moveTo };
+    canvas.setPointerCapture(event.pointerId);
+    canvas.style.cursor = "grabbing";
+  });
+
+  canvas.addEventListener("pointermove", (event) => {
+    const { x, y } = landingPointer(event, canvas);
+    if (!landingDrag) {
+      const landingView = landingViews.get(canvas);
+      canvas.style.cursor = draggableMarker(landingView, x, y) ? "grab" : "";
+      return;
+    }
+    if (event.pointerId !== landingDrag.pointerId) return;
+    const { moveTo, offsetX, offsetY } = landingDrag;
+    moveTo(x - offsetX, y - offsetY);
+  });
+
+  canvas.addEventListener("lostpointercapture", (event) => {
+    if (event.pointerId !== landingDrag?.pointerId) return;
+    landingDrag = null;
+    canvas.style.cursor = "";
+    drawTrajectory();
+    saveSettings();
+  });
 }
 
 function drawTrajectory() {
@@ -424,19 +639,19 @@ function drawTrajectory() {
 
   const width = rect.width;
   const height = rect.height;
-  const pad = { left: 42, right: 26, top: 26, bottom: 58 };
-  const chartW = width - pad.left - pad.right;
+  const pad = { top: 26, bottom: 58 };
   const chartH = height - pad.top - pad.bottom;
-  const minX = -3.5;
-  const maxX = 26;
   const maxY = 7;
-  const scaleX = (x) => pad.left + ((x - minX) / (maxX - minX)) * chartW;
   const scaleY = (y) => pad.top + chartH - (y / maxY) * chartH;
 
   const result = simulateTrajectory();
+  drawSpatialTrajectory(result);
   const netHeight = result.netCrossing ? result.netCrossing.netHeight : NET_CENTER_HEIGHT;
   const netClearance = result.netCrossing?.clearance ?? null;
-  drawLateralTrajectory(result);
+  const topView = drawLateralTrajectory(result);
+  // The canvases have no layout size while the trajectory tab is hidden.
+  if (!topView) return;
+  const { scaleX, layout } = topView;
   context.clearRect(0, 0, width, height);
 
   context.fillStyle = "#f8faf6";
@@ -490,6 +705,20 @@ function drawTrajectory() {
   context.beginPath();
   context.arc(scaleX(last.x), scaleY(last.y), 6, 0, Math.PI * 2);
   context.fill();
+  if (width) {
+    const start = result.points[0];
+    const depthAt = (x) => (x - scaleX(0)) / layout.scale;
+    const contact = drawContactMarker(context, scaleX(start.x), scaleY(start.y), (x, y) => {
+      moveContact(depthAt(x), start.z, (scaleY(0) - y) * maxY / chartH);
+    });
+    landingViews.set(canvas, {
+      layout,
+      contact,
+      markerX: scaleX(last.x),
+      markerY: scaleY(last.y),
+      targetAt: (x) => [depthAt(x), result.landingZ],
+    });
+  }
 
   const clearsNet = result.netCrossing !== null && (netClearance === null || netClearance > 0);
   const inCourt = result.landingX <= 23.77 && Math.abs(result.landingZ) <= DOUBLES_HALF_WIDTH && clearsNet;
@@ -522,6 +751,10 @@ function drawTrajectory() {
   setText("lateralAngleOut", `${readNumber("lateralAngle").toFixed(1)}°`);
   setText("contactHeightOut", `${readNumber("contactHeight").toFixed(2)} m`);
   setText("contactDepthOut", formatCourtDepth(readNumber("contactDepth")));
+  const contactLateral = readNumber("contactLateral");
+  setText("contactLateralOut", contactLateral === 0
+    ? "中央"
+    : `${contactLateral < 0 ? "左" : "右"} ${Math.abs(contactLateral).toFixed(1)} m`);
   setText("topspinOut", `${readNumber("topspin")} rpm`);
 }
 
@@ -532,26 +765,101 @@ function bindInputs(selector, handler) {
   });
 }
 
-document.querySelectorAll(".tab-button").forEach((button) => {
+const modeButtons = document.querySelectorAll(".tab-button");
+function selectMode(mode) {
+  for (const button of modeButtons) button.classList.toggle("active", button.dataset.panel === mode);
+  for (const panel of document.querySelectorAll(".panel")) panel.classList.toggle("active", panel.id === mode);
+}
+
+modeButtons.forEach((button) => {
   button.addEventListener("click", () => {
-    document.querySelectorAll(".tab-button").forEach((item) => item.classList.remove("active"));
-    document.querySelectorAll(".panel").forEach((panel) => panel.classList.remove("active"));
-    button.classList.add("active");
-    document.getElementById(button.dataset.panel).classList.add("active");
+    selectMode(button.dataset.panel);
     drawTrajectory();
+    saveSettings();
   });
 });
 
 bindInputs("#probabilityForm input", updateProbability);
 bindInputs("#trajectoryForm input", drawTrajectory);
+const trajectoryViews = {
+  spatial: document.getElementById("spatialCanvas"),
+  top: landingCanvas,
+  side: document.getElementById("trajectoryCanvas"),
+};
+const viewButtons = document.querySelectorAll(".view-controls button");
+function selectView(view) {
+  for (const [name, canvas] of Object.entries(trajectoryViews)) canvas.hidden = name !== view;
+  for (const button of viewButtons) button.setAttribute("aria-pressed", button.dataset.view === view);
+}
+
+for (const canvas of Object.values(trajectoryViews)) bindLandingDrag(canvas);
+for (const button of viewButtons) {
+  button.addEventListener("click", () => {
+    selectView(button.dataset.view);
+    drawTrajectory();
+    saveSettings();
+  });
+}
 document.querySelectorAll('input[name="contactPreset"]').forEach((input) => {
   input.addEventListener("change", () => applyContactPreset(input.value));
 });
-["contactHeight", "contactDepth"].forEach((id) => {
+["contactHeight", "contactDepth", "contactLateral"].forEach((id) => {
   document.getElementById(id).addEventListener("input", () => setContactPresetValue("custom"));
 });
 window.addEventListener("resize", drawTrajectory);
 
+const settingsKey = "tennisCalculator.settings.v1";
+const settingsForms = document.querySelectorAll("#probabilityForm, #trajectoryForm");
+const settingsRanges = document.querySelectorAll("#probabilityForm input[type=range], #trajectoryForm input[type=range]");
+const contactPresets = document.querySelectorAll('input[name="contactPreset"]');
+
+function saveSettings() {
+  const settings = {
+    mode: document.querySelector(".tab-button.active").dataset.panel,
+    view: document.querySelector('.view-controls button[aria-pressed="true"]').dataset.view,
+    preset: document.querySelector('input[name="contactPreset"]:checked').value,
+    values: Object.fromEntries(Array.from(settingsRanges, (input) => [input.id, readNumber(input.id)])),
+  };
+  try {
+    localStorage.setItem(settingsKey, JSON.stringify(settings));
+  } catch {
+    // The calculator can still run if browser storage is unavailable.
+  }
+}
+
+function restoreSettings() {
+  let settings;
+  try {
+    settings = JSON.parse(localStorage.getItem(settingsKey));
+  } catch {
+    return;
+  }
+  if (!settings) return;
+  for (const input of settingsRanges) {
+    const value = settings.values?.[input.id];
+    if (Number.isFinite(value)) setInputValue(input.id, value);
+  }
+  const preset = Array.from(contactPresets).find((input) => input.value === settings.preset);
+  if (preset) preset.checked = true;
+  if (Array.from(modeButtons).some((button) => button.dataset.panel === settings.mode)) selectMode(settings.mode);
+  if (Object.hasOwn(trajectoryViews, settings.view)) selectView(settings.view);
+}
+
+for (const form of settingsForms) {
+  form.addEventListener("input", saveSettings);
+  form.addEventListener("change", saveSettings);
+}
+
+document.getElementById("resetSettings").addEventListener("click", () => {
+  for (const form of settingsForms) form.reset();
+  selectMode("probability");
+  selectView("spatial");
+  applyContactPreset("groundstroke");
+  updateProbability();
+  saveSettings();
+});
+
 applyContactPreset("groundstroke");
+restoreSettings();
 updateProbability();
 drawTrajectory();
